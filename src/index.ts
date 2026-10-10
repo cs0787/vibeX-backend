@@ -5,71 +5,99 @@ import { v4 as uuidv4 } from 'uuid';
 import { TASK_LIBRARY } from './tasks/taskLibrary';
 import { getCoachGuidance } from './services/socraticCoach';
 import { compileEvidenceReport } from './services/evidenceEngine';
-import { TelemetryEvent, RecruiterSkillReport, CandidateFeedbackReport } from './types/assessment';
+import { TelemetryEvent, RecruiterSkillReport, CandidateFeedbackReport } from './types/assessments';
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 8080;
 
-app.use(cors());
+// Enable CORS for all incoming clients
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
-// In-Memory Session & Telemetry State
+// In-Memory Storage
 const activeSessions: Record<string, any> = {};
 const sessionTelemetry: Record<string, TelemetryEvent[]> = {};
 const sessionReports: Record<string, { recruiterReport: RecruiterSkillReport; candidateFeedback: CandidateFeedbackReport }> = {};
 
-// 1. Initialize Assessment Session
-app.post('/api/sessions/start', (req, res) => {
-  const { candidateName = "Chetan Shakhapure", taskId = "task-data-pipeline" } = req.body;
-  const sessionId = uuidv4();
-  const task = TASK_LIBRARY[taskId] || TASK_LIBRARY["task-data-pipeline"];
-
-  activeSessions[sessionId] = {
-    id: sessionId,
-    candidateName,
-    taskId: task.id,
-    startTime: new Date().toISOString()
-  };
-
-  sessionTelemetry[sessionId] = [
-    {
-      id: uuidv4(),
-      sessionId,
-      timestamp: new Date().toISOString(),
-      type: 'SESSION_ONBOARDED',
-      metadata: { candidateName, taskId: task.id }
-    }
-  ];
-
+// Root Health Route (Resolves "Cannot GET /")
+app.get('/', (req, res) => {
   res.json({
-    sessionId,
-    candidateName,
-    task
+    status: "online",
+    service: "vibeX Assessment Engine",
+    version: "1.0.0",
+    nvidiaNimEnabled: Boolean(process.env.NVIDIA_API_KEY),
+    timestamp: new Date().toISOString()
   });
 });
 
-// 2. Sandboxed Test Runner
+// Recruiter Candidate Pipeline List
+app.get('/api/candidates', (req, res) => {
+  res.json({
+    candidates: [
+      {
+        id: "cand-01",
+        name: "Chetan Shakhapure",
+        role: "Fullstack / Systems Engineer",
+        verdict: "Strong Hire",
+        score: 96,
+        aiFluency: "Balanced Partner",
+        testsPassed: "4 / 4",
+        duration: "18 mins",
+        evidence: [
+          { id: "EV-01", title: "Defensive Validation Architecture", desc: "Enforced schema guards throwing custom Error objects for corrupted telemetry packets.", eventLink: "EV_CODE_COMMIT_2" },
+          { id: "EV-02", title: "Targeted Socratic Prompting", desc: "Consulted AI on IEEE-754 precision constraints; verified logic before accepting output.", eventLink: "EV_AI_PROMPT_1" }
+        ]
+      },
+      {
+        id: "cand-02",
+        name: "Aarav Sharma",
+        role: "Backend Engineer",
+        verdict: "Consider (Follow-up)",
+        score: 75,
+        aiFluency: "Autonomous",
+        testsPassed: "3 / 4",
+        duration: "24 mins",
+        evidence: [
+          { id: "EV-03", title: "Float Rounding Precision Gap", desc: "Missed 2-decimal constraint on arithmetic aggregation test assertion.", eventLink: "EV_TEST_FAIL_3" }
+        ]
+      }
+    ]
+  });
+});
+
+// Start Candidate Session
+app.post('/api/sessions/start', (req, res) => {
+  const { candidateName = "Chetan Shakhapure", taskId = "task-iot-stream" } = req.body;
+  const sessionId = uuidv4();
+  const task = TASK_LIBRARY[taskId] || TASK_LIBRARY["task-iot-stream"];
+
+  activeSessions[sessionId] = { id: sessionId, candidateName, taskId: task.id, startTime: new Date().toISOString() };
+  sessionTelemetry[sessionId] = [
+    { id: uuidv4(), sessionId, timestamp: new Date().toISOString(), type: 'SESSION_ONBOARDED', metadata: { candidateName, taskId: task.id } }
+  ];
+
+  res.json({ sessionId, candidateName, task });
+});
+
+// Execute Tests in Sandboxed VM
 app.post('/api/execute/run-tests', (req, res) => {
-  const { sessionId, taskId = "task-data-pipeline", code } = req.body;
-  const task = TASK_LIBRARY[taskId] || TASK_LIBRARY["task-data-pipeline"];
-  const cleanCode = (code || '').replace(/export\s+/g, '');
+  const { sessionId, taskId = "task-iot-stream", code = "" } = req.body;
+  const task = TASK_LIBRARY[taskId] || TASK_LIBRARY["task-iot-stream"];
+  const cleanCode = code.replace(/export\s+/g, '');
 
   const results = task.tests.map(test => {
-    const sandboxContext: Record<string, any> = {
-      console: { log: () => {} },
-      Error,
-      Number,
-      Math,
-      JSON
-    };
-
+    const sandboxContext: Record<string, any> = { console: { log: () => {} }, Error, Number, Math, JSON };
     try {
       vm.createContext(sandboxContext);
       vm.runInContext(cleanCode, sandboxContext, { timeout: 1500 });
       vm.runInContext(test.assertionCode, sandboxContext, { timeout: 1500 });
-      return { id: test.id, description: test.description, passed: true, actual: "Pass", isEdgeCase: test.isEdgeCase };
+      return { id: test.id, description: test.description, passed: true, actual: "Pass" };
     } catch (err: any) {
-      return { id: test.id, description: test.description, passed: false, actual: err.message || "Runtime Error", isEdgeCase: test.isEdgeCase };
+      return { id: test.id, description: test.description, passed: false, actual: err.message || "Assertion Failed" };
     }
   });
 
@@ -78,10 +106,7 @@ app.post('/api/execute/run-tests', (req, res) => {
 
   if (sessionId && sessionTelemetry[sessionId]) {
     sessionTelemetry[sessionId].push({
-      id: uuidv4(),
-      sessionId,
-      timestamp: new Date().toISOString(),
-      type: 'TESTS_EXECUTED',
+      id: uuidv4(), sessionId, timestamp: new Date().toISOString(), type: 'TESTS_EXECUTED',
       metadata: { passedCount, failedCount, total: results.length }
     });
   }
@@ -89,41 +114,26 @@ app.post('/api/execute/run-tests', (req, res) => {
   res.json({ results });
 });
 
-// 3. Socratic AI Coach with NVIDIA NIM
+// Socratic AI Coach with NVIDIA NIM
 app.post('/api/ai/coach', async (req, res) => {
-  const { sessionId, prompt, code, failedTestList = [] } = req.body;
-  
-  // Call NVIDIA NIM
+  const { sessionId, prompt, code = "", failedTestList = [] } = req.body;
   const guidance = await getCoachGuidance(prompt, code, failedTestList);
 
   if (sessionId && sessionTelemetry[sessionId]) {
-    sessionTelemetry[sessionId].push({
-      id: uuidv4(),
-      sessionId,
-      timestamp: new Date().toISOString(),
-      type: 'AI_PROMPT_SUBMITTED',
-      metadata: { prompt }
-    });
-    sessionTelemetry[sessionId].push({
-      id: uuidv4(),
-      sessionId,
-      timestamp: new Date().toISOString(),
-      type: 'AI_GUIDANCE_SERVED',
-      metadata: { guidance, provider: 'NVIDIA NIM' }
-    });
+    sessionTelemetry[sessionId].push({ id: uuidv4(), sessionId, timestamp: new Date().toISOString(), type: 'AI_PROMPT_SUBMITTED', metadata: { prompt } });
+    sessionTelemetry[sessionId].push({ id: uuidv4(), sessionId, timestamp: new Date().toISOString(), type: 'AI_GUIDANCE_SERVED', metadata: { guidance } });
   }
 
   res.json({ guidance });
 });
-// 4. Submit Assessment & Generate Evidence Reports
+
+// Submit Assessment
 app.post('/api/sessions/:id/submit', (req, res) => {
   const { id } = req.params;
-  const { code, taskId = "task-data-pipeline" } = req.body;
-  const session = activeSessions[id];
-  const task = TASK_LIBRARY[taskId] || TASK_LIBRARY["task-data-pipeline"];
+  const { code = "", taskId = "task-iot-stream" } = req.body;
+  const task = TASK_LIBRARY[taskId] || TASK_LIBRARY["task-iot-stream"];
 
-  // Run final assertions
-  const cleanCode = (code || '').replace(/export\s+/g, '');
+  const cleanCode = code.replace(/export\s+/g, '');
   const testResults = task.tests.map(test => {
     const sandboxContext: Record<string, any> = { console: { log: () => {} }, Error, Number, Math, JSON };
     try {
@@ -132,25 +142,27 @@ app.post('/api/sessions/:id/submit', (req, res) => {
       vm.runInContext(test.assertionCode, sandboxContext, { timeout: 1500 });
       return { id: test.id, description: test.description, passed: true, actual: "Pass" };
     } catch (err: any) {
-      return { id: test.id, description: test.description, passed: false, actual: err.message || "Runtime Error" };
+      return { id: test.id, description: test.description, passed: false, actual: err.message || "Failed" };
     }
   });
 
   const events = sessionTelemetry[id] || [];
-  const reports = compileEvidenceReport(id, session?.candidateName || "Candidate", task.title, events, testResults);
+  const reports = compileEvidenceReport(id, activeSessions[id]?.candidateName || "Candidate", task.title, events, testResults);
   sessionReports[id] = reports;
 
   res.json(reports);
 });
 
-// 5. Fetch Reports
+// Fetch Saved Report
 app.get('/api/reports/:id', (req, res) => {
-  const { id } = req.params;
-  const report = sessionReports[id];
+  const report = sessionReports[req.params.id];
   if (!report) return res.status(404).json({ error: "Report not found" });
   res.json(report);
 });
 
-app.listen(PORT, () => {
-  console.log(` vibeX-backend running on http://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => console.log(`vibeX-backend listening on port ${PORT}`));
+}
+
+export default app;
+module.exports = app;
