@@ -89,10 +89,12 @@ app.post('/api/execute/run-tests', (req, res) => {
   res.json({ results });
 });
 
-// 3. Socratic AI Coach
-app.post('/api/ai/coach', (req, res) => {
+// 3. Socratic AI Coach with NVIDIA NIM
+app.post('/api/ai/coach', async (req, res) => {
   const { sessionId, prompt, code, failedTestList = [] } = req.body;
-  const guidance = getCoachGuidance(prompt, code, failedTestList);
+  
+  // Call NVIDIA NIM
+  const guidance = await getCoachGuidance(prompt, code, failedTestList);
 
   if (sessionId && sessionTelemetry[sessionId]) {
     sessionTelemetry[sessionId].push({
@@ -107,13 +109,12 @@ app.post('/api/ai/coach', (req, res) => {
       sessionId,
       timestamp: new Date().toISOString(),
       type: 'AI_GUIDANCE_SERVED',
-      metadata: { guidance }
+      metadata: { guidance, provider: 'NVIDIA NIM' }
     });
   }
 
   res.json({ guidance });
 });
-
 // 4. Submit Assessment & Generate Evidence Reports
 app.post('/api/sessions/:id/submit', (req, res) => {
   const { id } = req.params;
