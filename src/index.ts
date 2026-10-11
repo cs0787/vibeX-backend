@@ -10,6 +10,21 @@ import { TelemetryEvent, RecruiterSkillReport, CandidateFeedbackReport } from '.
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+
+// Test AI connection directly in the browser
+app.get('/api/test-ai', async (req, res) => {
+  try {
+    const reply = await getCoachGuidance("Hello from vibeX test", "const x = 1;", []);
+    res.json({
+      nvidiaApiKeyPresent: Boolean(process.env.NVIDIA_API_KEY),
+      nvidiaModel: process.env.NVIDIA_MODEL || "meta/llama-3.3-70b-instruct",
+      sampleReply: reply
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Enable CORS for all incoming clients
 app.use(cors({
   origin: '*',
