@@ -11,20 +11,6 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 
-// Test AI connection directly in the browser
-app.get('/api/test-ai', async (req, res) => {
-  try {
-    const reply = await getCoachGuidance("Hello from vibeX test", "const x = 1;", []);
-    res.json({
-      nvidiaApiKeyPresent: Boolean(process.env.NVIDIA_API_KEY),
-      nvidiaModel: process.env.NVIDIA_MODEL || "meta/llama-3.3-70b-instruct",
-      sampleReply: reply
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // Enable CORS for all incoming clients
 app.use(cors({
   origin: '*',
@@ -99,6 +85,64 @@ app.get('/', (req, res) => {
     nvidiaNimEnabled: Boolean(process.env.NVIDIA_API_KEY),
     timestamp: new Date().toISOString()
   });
+});
+
+// Diagnostic route to test NVIDIA NIM directly in the browser
+app.get('/api/test-ai', async (req, res) => {
+  const rawKey = process.env.NVIDIA_API_KEY || '';
+  const cleanKey = rawKey.replace(/^["']|["']$/g, '').trim();
+  const model = process.env.NVIDIA_MODEL || "meta/llama-3.3-70b-instruct";
+
+  if (!cleanKey) {
+    return res.status(400).json({
+      success: false,
+      error: "NVIDIA_API_KEY is missing from environment variables."
+    });
+  }
+
+  try {
+    const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${cleanKey}`
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          { role: "user", content: "Reply with exactly: 'NVIDIA NIM connection verified!'" }
+        ],
+        max_tokens: 50,
+        temperature: 0.2
+      })
+    });
+
+    const status = response.status;
+    const rawBody = await response.text();
+
+    if (!response.ok) {
+      return res.status(status).json({
+        success: false,
+        httpStatus: status,
+        nvidiaResponse: rawBody,
+        hint: status === 401 
+          ? "Your NVIDIA key is unauthorized. Check that there are no quotes or spaces in Vercel settings."
+          : "NVIDIA NIM rejected the request with the above error."
+      });
+    }
+
+    const data = JSON.parse(rawBody);
+    return res.json({
+      success: true,
+      modelUsed: model,
+      reply: data.choices?.[0]?.message?.content
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      exception: err.message
+    });
+  }
 });
 
 // Recruiter Candidate Pipeline List
