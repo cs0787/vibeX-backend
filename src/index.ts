@@ -32,65 +32,17 @@ app.get('/', (req, res) => {
   });
 });
 
-// Diagnostic route for direct browser testing
+// Diagnostic route: inspect NVIDIA NIM model response directly
 app.get('/api/test-ai', async (req, res) => {
-  const rawKey = process.env.NVIDIA_API_KEY || '';
-  const cleanKey = rawKey.replace(/^["']|["']$/g, '').trim();
-  const model = process.env.NVIDIA_MODEL || "meta/llama-3.3-70b-instruct";
-
-  if (!cleanKey) {
-    return res.status(400).json({
-      success: false,
-      error: "NVIDIA_API_KEY is missing from environment variables."
-    });
-  }
-
-  try {
-    const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${cleanKey}`
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: "user", content: "Reply with exactly: 'NVIDIA NIM connection verified!'" }
-        ],
-        max_tokens: 50,
-        temperature: 0.2
-      })
-    });
-
-    const status = response.status;
-    const rawBody = await response.text();
-
-    if (!response.ok) {
-      return res.status(status).json({
-        success: false,
-        httpStatus: status,
-        nvidiaResponse: rawBody,
-        hint: status === 401 
-          ? "Your NVIDIA key is unauthorized. Check that there are no quotes or spaces in Vercel settings."
-          : "NVIDIA NIM rejected the request with the above error."
-      });
-    }
-
-    const data = JSON.parse(rawBody);
-    return res.json({
-      success: true,
-      modelUsed: model,
-      reply: data.choices?.[0]?.message?.content
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      exception: err.message
-    });
-  }
+  const reply = await getCoachGuidance("Testing connection", "const x = 1;", []);
+  res.json({
+    nvidiaApiKeyConfigured: Boolean(process.env.NVIDIA_API_KEY),
+    activeModelConfigured: process.env.NVIDIA_MODEL || "meta/llama-3.1-70b-instruct",
+    testCompletion: reply
+  });
 });
 
-// Candidate Catalog Pipeline
+// Candidate Catalog
 app.get('/api/candidates', (req, res) => {
   res.json({
     candidates: [
@@ -106,19 +58,6 @@ app.get('/api/candidates', (req, res) => {
         evidence: [
           { id: "EV-01", title: "Defensive Validation Architecture", desc: "Enforced schema guards throwing custom Error objects for corrupted telemetry packets.", eventLink: "EV_CODE_COMMIT_2" },
           { id: "EV-02", title: "Targeted Socratic Prompting", desc: "Consulted AI on IEEE-754 precision constraints; verified logic before accepting output.", eventLink: "EV_AI_PROMPT_1" }
-        ]
-      },
-      {
-        id: "cand-02",
-        name: "Aarav Sharma",
-        role: "Backend Engineer",
-        verdict: "Consider (Follow-up)",
-        score: 75,
-        aiFluency: "Autonomous",
-        testsPassed: "3 / 4",
-        duration: "24 mins",
-        evidence: [
-          { id: "EV-03", title: "Float Rounding Precision Gap", desc: "Missed 2-decimal constraint on arithmetic aggregation test assertion.", eventLink: "EV_TEST_FAIL_3" }
         ]
       }
     ]
@@ -139,7 +78,7 @@ app.post('/api/sessions/start', (req, res) => {
   res.json({ sessionId, candidateName, task });
 });
 
-// Sandboxed Test Execution
+// Execute Unit & Edge-Case Assertions
 app.post('/api/execute/run-tests', (req, res) => {
   const { sessionId, taskId = "task-iot-stream", code = "" } = req.body;
   const task = TASK_LIBRARY[taskId] || TASK_LIBRARY["task-iot-stream"];
@@ -170,7 +109,7 @@ app.post('/api/execute/run-tests', (req, res) => {
   res.json({ results });
 });
 
-// Socratic AI Coach / Pair Programmer Endpoint
+// AI Coach & Pair Programmer Route
 app.post('/api/ai/coach', async (req, res) => {
   const { sessionId, prompt, code = "", failedTestList = [] } = req.body;
   const guidance = await getCoachGuidance(prompt, code, failedTestList);
@@ -183,7 +122,7 @@ app.post('/api/ai/coach', async (req, res) => {
   res.json({ guidance });
 });
 
-// Submit Assessment Session
+// Submit Assessment
 app.post('/api/sessions/:id/submit', (req, res) => {
   const { id } = req.params;
   const { code = "", taskId = "task-iot-stream" } = req.body;
@@ -209,7 +148,7 @@ app.post('/api/sessions/:id/submit', (req, res) => {
   res.json(reports);
 });
 
-// Get Generated Dossier Report
+// Fetch Saved Report
 app.get('/api/reports/:id', (req, res) => {
   const report = sessionReports[req.params.id];
   if (!report) return res.status(404).json({ error: "Report not found" });
@@ -217,7 +156,7 @@ app.get('/api/reports/:id', (req, res) => {
 });
 
 if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => console.log(`vibeX-backend listening on port ${PORT}`));
+  app.listen(PORT, () => console.log(`vibeX-backend running on port ${PORT}`));
 }
 
 export default app;
