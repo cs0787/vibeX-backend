@@ -3,7 +3,7 @@ import cors from 'cors';
 import vm from 'vm';
 import { v4 as uuidv4 } from 'uuid';
 import { TASK_LIBRARY } from './tasks/taskLibrary';
-import { getCoachGuidance } from './services/socraticCoach';
+import { getCoachGuidance, getAvailableNvidiaModels } from './services/socraticCoach';
 import { compileEvidenceReport } from './services/evidenceEngine';
 import { TelemetryEvent, RecruiterSkillReport, CandidateFeedbackReport } from './types/assessments';
 
@@ -32,14 +32,20 @@ app.get('/', (req, res) => {
   });
 });
 
-// Diagnostic route: inspect NVIDIA NIM model response directly
+// Diagnostic route: lists available models and runs an live completion
 app.get('/api/test-ai', async (req, res) => {
-  const reply = await getCoachGuidance("Testing connection", "const x = 1;", []);
-  res.json({
-    nvidiaApiKeyConfigured: Boolean(process.env.NVIDIA_API_KEY),
-    activeModelConfigured: process.env.NVIDIA_MODEL || "meta/llama-3.1-70b-instruct",
-    testCompletion: reply
-  });
+  try {
+    const models = await getAvailableNvidiaModels();
+    const reply = await getCoachGuidance("Reply with exactly: 'NVIDIA NIM active and verified!'", "const x = 1;", []);
+    res.json({
+      nvidiaApiKeyConfigured: Boolean(process.env.NVIDIA_API_KEY),
+      totalModelsAvailable: models.length,
+      sampleModels: models.slice(0, 10),
+      testCompletion: reply
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Candidate Catalog
