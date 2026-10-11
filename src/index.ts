@@ -10,8 +10,6 @@ import { TelemetryEvent, RecruiterSkillReport, CandidateFeedbackReport } from '.
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-
-// Enable CORS for all incoming clients
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -19,64 +17,11 @@ app.use(cors({
 }));
 app.use(express.json());
 
-import { queryNeon } from './db/neon';
-
-// Signup Endpoint
-app.post('/api/auth/signup', async (req, res) => {
-  const { name, email, password, role } = req.body;
-  if (!name || !email || !password || !role) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-
-  // Attempt Neon insert
-  const result = await queryNeon(
-    'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, email, role',
-    [name, email.toLowerCase(), password, role]
-  );
-
-  if (result && result.length > 0) {
-    return res.json({ user: result[0] });
-  }
-
-  // Resilient fallback for demo without DB
-  res.json({
-    user: { id: "user-" + Date.now(), name, email, role }
-  });
-});
-
-// Login Endpoint
-app.post('/api/auth/login', async (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ error: "Email and password required" });
-  }
-
-  const result = await queryNeon(
-    'SELECT id, name, email, role, password_hash FROM users WHERE email = $1 LIMIT 1',
-    [email.toLowerCase()]
-  );
-
-  if (result && result.length > 0) {
-    const user = result[0];
-    if (user.password_hash === password) {
-      return res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role } });
-    }
-    return res.status(401).json({ error: "Invalid credentials" });
-  }
-
-  // Fallback demo user
-  const fallbackRole = email.includes('recruiter') ? 'recruiter' : 'candidate';
-  res.json({
-    user: { id: "user-demo", name: email.split('@')[0], email, role: fallbackRole }
-  });
-});
-
-// In-Memory Storage
 const activeSessions: Record<string, any> = {};
 const sessionTelemetry: Record<string, TelemetryEvent[]> = {};
 const sessionReports: Record<string, { recruiterReport: RecruiterSkillReport; candidateFeedback: CandidateFeedbackReport }> = {};
 
-// Root Health Route (Resolves "Cannot GET /")
+// Root Health Route
 app.get('/', (req, res) => {
   res.json({
     status: "online",
@@ -87,7 +32,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Diagnostic route to test NVIDIA NIM directly in the browser
+// Diagnostic route for direct browser testing
 app.get('/api/test-ai', async (req, res) => {
   const rawKey = process.env.NVIDIA_API_KEY || '';
   const cleanKey = rawKey.replace(/^["']|["']$/g, '').trim();
@@ -145,7 +90,7 @@ app.get('/api/test-ai', async (req, res) => {
   }
 });
 
-// Recruiter Candidate Pipeline List
+// Candidate Catalog Pipeline
 app.get('/api/candidates', (req, res) => {
   res.json({
     candidates: [
@@ -194,14 +139,14 @@ app.post('/api/sessions/start', (req, res) => {
   res.json({ sessionId, candidateName, task });
 });
 
-// Execute Tests in Sandboxed VM
+// Sandboxed Test Execution
 app.post('/api/execute/run-tests', (req, res) => {
   const { sessionId, taskId = "task-iot-stream", code = "" } = req.body;
   const task = TASK_LIBRARY[taskId] || TASK_LIBRARY["task-iot-stream"];
   const cleanCode = code.replace(/export\s+/g, '');
 
   const results = task.tests.map(test => {
-    const sandboxContext: Record<string, any> = { console: { log: () => {} }, Error, Number, Math, JSON };
+    const sandboxContext: Record<string, any> = { console: { log: () => {} }, Error, Number, Math, JSON, Map, Set };
     try {
       vm.createContext(sandboxContext);
       vm.runInContext(cleanCode, sandboxContext, { timeout: 1500 });
@@ -225,7 +170,7 @@ app.post('/api/execute/run-tests', (req, res) => {
   res.json({ results });
 });
 
-// Socratic AI Coach with NVIDIA NIM
+// Socratic AI Coach / Pair Programmer Endpoint
 app.post('/api/ai/coach', async (req, res) => {
   const { sessionId, prompt, code = "", failedTestList = [] } = req.body;
   const guidance = await getCoachGuidance(prompt, code, failedTestList);
@@ -238,7 +183,7 @@ app.post('/api/ai/coach', async (req, res) => {
   res.json({ guidance });
 });
 
-// Submit Assessment
+// Submit Assessment Session
 app.post('/api/sessions/:id/submit', (req, res) => {
   const { id } = req.params;
   const { code = "", taskId = "task-iot-stream" } = req.body;
@@ -246,7 +191,7 @@ app.post('/api/sessions/:id/submit', (req, res) => {
 
   const cleanCode = code.replace(/export\s+/g, '');
   const testResults = task.tests.map(test => {
-    const sandboxContext: Record<string, any> = { console: { log: () => {} }, Error, Number, Math, JSON };
+    const sandboxContext: Record<string, any> = { console: { log: () => {} }, Error, Number, Math, JSON, Map, Set };
     try {
       vm.createContext(sandboxContext);
       vm.runInContext(cleanCode, sandboxContext, { timeout: 1500 });
@@ -264,7 +209,7 @@ app.post('/api/sessions/:id/submit', (req, res) => {
   res.json(reports);
 });
 
-// Fetch Saved Report
+// Get Generated Dossier Report
 app.get('/api/reports/:id', (req, res) => {
   const report = sessionReports[req.params.id];
   if (!report) return res.status(404).json({ error: "Report not found" });
