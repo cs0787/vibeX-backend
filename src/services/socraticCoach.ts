@@ -1,23 +1,22 @@
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
+const rawKey = process.env.NVIDIA_API_KEY || '';
+const NVIDIA_API_KEY = rawKey.replace(/^["']|["']$/g, '').trim();
 const NVIDIA_MODEL = process.env.NVIDIA_MODEL || "meta/llama-3.3-70b-instruct";
 const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
 
-const SYSTEM_PROMPT = `You are the vibeX AI Pair Programmer and Socratic Coach for an iMocha coding assessment.
-You assist developers in real time.
-RULES:
-1. Be concise, direct, and helpful (under 120 words).
-2. Answer questions about code logic, edge cases, bugs, and architecture accurately.
-3. When asked to code or refactor, provide clear explanations and relevant code blocks.`;
+const SYSTEM_PROMPT = `You are the vibeX AI Pair Programmer and Socratic Coach for an iMocha coding assessment (IM-01).
+Strict Rules:
+1. Provide concise, direct, and constructive engineering guidance (under 120 words).
+2. Help candidates reason about edge cases, type safety, schema validation, and floating-point arithmetic.
+3. If the candidate asks you to write code or scaffold a function, provide clean, idiomatic JavaScript snippets and explain how the logic works.
+4. Answer developer greetings and inquiries constructively.`;
 
 export async function getCoachGuidance(
-  prompt: string, 
-  code: string, 
+  prompt: string,
+  code: string,
   failedTestList: string[] = []
 ): Promise<string> {
-  // 1. Check if NVIDIA_API_KEY exists
   if (!NVIDIA_API_KEY) {
-    console.warn("NVIDIA_API_KEY environment variable is not defined in backend.");
-    return `⚠️ **[NVIDIA NIM Notice]**: \`NVIDIA_API_KEY\` is not set in Vercel backend environment variables. Please add it to Vercel Settings -> Environment Variables and redeploy. (Fallback active: ${getSmartFallback(prompt)})`;
+    return `⚠️ [NVIDIA NIM Notice]: NVIDIA_API_KEY is not configured in backend environment variables. Add NVIDIA_API_KEY to Vercel Settings -> Environment Variables and redeploy. (Fallback active: ${getSmartFallback(prompt)})`;
   }
 
   try {
@@ -25,37 +24,34 @@ export async function getCoachGuidance(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${NVIDIA_API_KEY.trim()}`
+        "Authorization": `Bearer ${NVIDIA_API_KEY}`
       },
       body: JSON.stringify({
         model: NVIDIA_MODEL,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { 
-            role: "user", 
-            content: `Developer Question: "${prompt}"\n\nCurrent Code in Editor:\n\`\`\`javascript\n${code.slice(0, 1500)}\n\`\`\`\n\nFailing Tests: ${failedTestList.length > 0 ? failedTestList.join(', ') : 'All passing'}`
+          {
+            role: "user",
+            content: `Candidate Question: "${prompt}"\n\nCurrent Code in Editor:\n\`\`\`javascript\n${code.slice(0, 1500)}\n\`\`\`\n\nFailing Tests: ${failedTestList.length > 0 ? failedTestList.join(', ') : 'All currently passing'}`
           }
         ],
         temperature: 0.3,
-        max_tokens: 400
+        max_tokens: 350
       })
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`NVIDIA NIM returned ${response.status}:`, errText);
-      return `⚠️ **[NVIDIA NIM API Error ${response.status}]**: ${response.status === 401 ? 'Invalid or expired API Key' : 'Request error'}. (${getSmartFallback(prompt)})`;
+      console.error(`NVIDIA NIM returned HTTP ${response.status}:`, errText);
+      return `⚠️ [NVIDIA NIM API Error ${response.status}]: ${response.status === 401 ? 'Unauthorized token. Check API key in Vercel.' : errText}. (${getSmartFallback(prompt)})`;
     }
 
     const data: any = await response.json();
     const content = data.choices?.[0]?.message?.content;
-    if (content) {
-      return content;
-    }
-    return getSmartFallback(prompt);
+    return content || getSmartFallback(prompt);
   } catch (err: any) {
     console.error("NVIDIA NIM fetch exception:", err);
-    return `⚠️ **[Connection Error]**: Failed to reach NVIDIA NIM endpoint. (${getSmartFallback(prompt)})`;
+    return `⚠️ [Connection Error]: ${err.message}. (${getSmartFallback(prompt)})`;
   }
 }
 
