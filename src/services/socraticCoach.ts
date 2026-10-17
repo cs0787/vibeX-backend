@@ -1,15 +1,13 @@
-import axios from 'axios';
-
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '';
-const NVIDIA_BASE_URL = '[https://integrate.api.nvidia.com/v1](https://integrate.api.nvidia.com/v1)';
+const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 
 export async function getAvailableNvidiaModels(): Promise<string[]> {
   try {
-    const res = await axios.get(`${NVIDIA_BASE_URL}/models`, {
-      headers: { Authorization: `Bearer ${NVIDIA_API_KEY}` },
-      timeout: 5000
+    const res = await fetch(`${NVIDIA_BASE_URL}/models`, {
+      headers: { Authorization: `Bearer ${NVIDIA_API_KEY}` }
     });
-    return res.data.data.map((m: any) => m.id);
+    const data: any = await res.json();
+    return data.data.map((m: any) => m.id);
   } catch (err) {
     return ['meta/llama-3.1-70b-instruct'];
   }
@@ -51,9 +49,13 @@ ${currentCode}
 \`\`\``;
 
   try {
-    const response = await axios.post(
-      `${NVIDIA_BASE_URL}/chat/completions`,
-      {
+    const response = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${NVIDIA_API_KEY}`
+      },
+      body: JSON.stringify({
         model: 'meta/llama-3.1-70b-instruct',
         messages: [
           { role: 'system', content: systemPrompt },
@@ -61,19 +63,13 @@ ${currentCode}
         ],
         temperature: 0.2,
         max_tokens: 600
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${NVIDIA_API_KEY}`
-        },
-        timeout: 15000
-      }
-    );
+      })
+    });
 
-    return response.data.choices[0]?.message?.content || "No guidance generated.";
+    const data: any = await response.json();
+    return data.choices?.[0]?.message?.content || "No guidance generated.";
   } catch (err: any) {
-    console.error("NVIDIA NIM Error:", err.response?.data || err.message);
+    console.error("NVIDIA NIM Error:", err);
     return "### ⚠️ Service Notice\n* Inference gateway temporarily unavailable.\n* Please verify network connection or retest in sandbox.";
   }
 }
